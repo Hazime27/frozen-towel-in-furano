@@ -173,6 +173,15 @@ h1 {
   background: rgba(12, 26, 46, 0.62);
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
 }
+.sharing { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.sharing .lab { flex: none; margin-right: 2px; }
+.sharelink {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 38px; padding: 0 16px; border-radius: 999px;
+  border: 1px solid var(--line); background: rgba(255, 255, 255, 0.06);
+  color: var(--text); font: 700 13px/1 var(--font-body); text-decoration: none;
+}
+.sharelink:hover { background: rgba(255, 255, 255, 0.14); }
 @media (max-width: 420px) {
   h1 { font-size: 22px; }
   .stat b { font-size: 28px; }
@@ -218,6 +227,12 @@ h1 {
         <div><dt>平均回転</dt><dd id="rAvg"></dd></div>
         <div><dt>ベスト</dt><dd id="rBest"></dd></div>
       </dl>
+      <div class="sharing">
+        <span class="lab">SNSに投稿</span>
+        <a id="shX" class="sharelink" href="#" target="_blank" rel="noopener noreferrer">X</a>
+        <a id="shLine" class="sharelink" href="#" target="_blank" rel="noopener noreferrer">LINE</a>
+        <a id="shTh" class="sharelink" href="#" target="_blank" rel="noopener noreferrer">Threads</a>
+      </div>
       <div class="actions">
         <button id="againBtn" class="primary" type="button">もう一度</button>
         <button id="copyBtn" class="ghostbtn" type="button">結果をコピー</button>
@@ -391,7 +406,14 @@ h1 {
     return 'ぬるい朝';
   }
   function shareString() {
-    return '凍結タオル選手権 富良野：' + time.toFixed(2) + '秒で凍結(最高' + maxRps.toFixed(1) + '回転/秒) ランク「' + rankOf(time) + '」';
+    return '凍結タオル選手権 富良野：' + time.toFixed(2) + '秒で凍結！(最高' + maxRps.toFixed(1) + '回転/秒) ランク「' + rankOf(time) + '」 #凍結タオル選手権 #富良野';
+  }
+
+  function updateShareLinks() {
+    var q = encodeURIComponent(shareString());
+    $('shX').href = 'https://x.com/intent/post?text=' + q;
+    $('shLine').href = 'https://line.me/R/msg/text/?' + q;
+    $('shTh').href = 'https://www.threads.net/intent/post?text=' + q;
   }
 
   var isBest = false;
@@ -418,6 +440,7 @@ h1 {
     $('newBest').hidden = !isBest;
     $('shareText').hidden = true;
     $('copyBtn').textContent = '結果をコピー';
+    updateShareLinks();
     $('result').hidden = false;
     $('hint').style.opacity = '0';
   }
