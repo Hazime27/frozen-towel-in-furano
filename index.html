@@ -24,6 +24,8 @@
   --muted: #8ea8c2;
   --panel: rgba(12, 26, 46, 0.82);
   --line: rgba(180, 220, 250, 0.2);
+  --storm: #bfe6ff;
+  --drizzle: #8fa6bf;
   --font-display: "Big Shoulders Display", "Arial Narrow", "Helvetica Neue", sans-serif;
   --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
   color-scheme: dark;
@@ -179,6 +181,23 @@ h1 {
   background: rgba(12, 26, 46, 0.62);
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
 }
+.stagebadge {
+  position: absolute; top: 10px; left: 10px; z-index: 3;
+  max-width: calc(100% - 190px);
+  padding: 6px 12px 7px; border-radius: 12px;
+  background: rgba(12, 26, 46, 0.62); border: 1px solid var(--line);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  display: flex; flex-direction: column; gap: 1px; pointer-events: none;
+}
+.stagebadge b { font: 800 15px/1.2 var(--font-body); letter-spacing: 0.04em; }
+.stagebadge small { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; }
+.stagebadge[data-kind="bonus"] { border-color: var(--storm); }
+.stagebadge[data-kind="bonus"] small { color: var(--storm); }
+.stagebadge[data-kind="handicap"] { border-color: var(--drizzle); }
+.stagebadge[data-kind="handicap"] small { color: var(--drizzle); }
+.stagesel { max-width: 110px; text-overflow: ellipsis; }
+.rnote { margin: -4px 0 10px; font-size: 11px; color: var(--muted); }
+.rnote:empty { display: none; }
 .sharing { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .sharing .lab { flex: none; margin-right: 2px; }
 .sharelink {
@@ -202,7 +221,7 @@ h1 {
       <p>凍結タオル選手権 · 富良野</p>
     </div>
     <div class="env" aria-label="環境">
-      <span>気温 <b>−24℃</b></span>
+      <span>気温 <b id="airT">−24℃</b></span>
       <span>タオル <b id="towelT">+6℃</b></span>
     </div>
   </header>
@@ -221,7 +240,17 @@ h1 {
 
   <main class="stage" id="stage">
     <canvas id="cv" role="img" aria-label="夜明け前の雪原で濡れタオルを振り回す人。画面を円を描くようになぞると回る。"></canvas>
+    <div class="stagebadge" id="stageBadge" data-kind="normal">
+      <b id="stName"></b>
+      <small id="stDesc"></small>
+    </div>
     <div class="tools">
+      <select id="stageSel" class="ghostbtn toolbtn stagesel" aria-label="ステージ">
+        <option value="auto">おまかせ</option>
+        <option value="normal">通常</option>
+        <option value="fubuki">地吹雪</option>
+        <option value="ame">雨</option>
+      </select>
       <button id="resetBtn" class="ghostbtn toolbtn" type="button">リセット</button>
     </div>
     <p class="hint" id="hint">画面をぐるぐるなぞって、濡れタオルを振り回そう</p>
@@ -233,6 +262,7 @@ h1 {
         <div><dt>平均回転</dt><dd id="rAvg"></dd></div>
         <div><dt>ベスト</dt><dd id="rBest"></dd></div>
       </dl>
+      <p class="rnote" id="rNote"></p>
       <div class="sharing">
         <span class="lab">SNSに投稿</span>
         <a id="shX" class="sharelink" href="#" target="_blank" rel="noopener noreferrer">X</a>
@@ -253,7 +283,7 @@ h1 {
   'use strict';
   var TAU = Math.PI * 2;
   var $ = function (id) { return document.getElementById(id); };
-  var cv = $('cv'), ctx = cv.getContext('2d'), stage = $('stage');
+  var cv = $('cv'), ctx = cv.getContext('2d'), stageEl = $('stage');
   var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
@@ -282,6 +312,29 @@ h1 {
   try { var bv = parseFloat(localStorage.getItem('frozen-towel-best')); if (isFinite(bv) && bv > 0) best = bv; } catch (e) {}
   var bgc = null;
 
+  /* ---------- stages ---------- */
+  var STAGES = {
+    normal: { id: 'normal', name: 'しばれる朝', desc: '標準の凍結速度', kind: 'normal', air: -24, mult: 1, melt: 1, count: 0, fall: 0, wind: 0, streak: 0, flakeFall: 1, flakeDrift: 0 },
+    fubuki: { id: 'fubuki', name: '地吹雪の追い風', desc: 'ボーナス 凍結 ×1.6', kind: 'bonus', air: -32, mult: 1.6, melt: 0.7, count: 140, fall: 260, wind: 520, streak: 0.05, flakeFall: 3, flakeDrift: 0.5 },
+    ame: { id: 'ame', name: 'ぐずつく雨の朝', desc: 'ハンデ 凍結 ×0.6', kind: 'handicap', air: -3, mult: 0.6, melt: 1.4, count: 150, fall: 1300, wind: 160, streak: 0.018, flakeFall: 1, flakeDrift: 0 }
+  };
+  var stageMode = 'auto', stage = STAGES.normal;
+  var wx = [], wxR = rng(33);
+  for (var wi = 0; wi < 150; wi++) wx.push({ x: wxR(), y: wxR(), v: 0.75 + wxR() * 0.5 });
+  function pickStage() {
+    if (stageMode !== 'auto') return STAGES[stageMode];
+    var r = Math.random();
+    return r < 0.15 ? STAGES.fubuki : (r < 0.3 ? STAGES.ame : STAGES.normal);
+  }
+  function applyStage(st) {
+    stage = st;
+    setText($('stName'), st.name);
+    setText($('stDesc'), st.desc);
+    $('stageBadge').setAttribute('data-kind', st.kind);
+    setText($('airT'), '−' + Math.abs(st.air) + '℃');
+  }
+  applyStage(STAGES.normal);
+
   var N = 16;
   var nx = new Float32Array(N + 1), ny = new Float32Array(N + 1);
   var frostR = rng(7), frostA = [], frostL = [];
@@ -297,7 +350,7 @@ h1 {
 
   /* ---------- layout ---------- */
   function layout() {
-    var r = stage.getBoundingClientRect();
+    var r = stageEl.getBoundingClientRect();
     W = Math.max(200, Math.floor(r.width));
     H = Math.max(240, Math.floor(r.height));
     DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -405,10 +458,11 @@ h1 {
 
   /* ---------- game logic ---------- */
   function rankOf(t) {
-    if (t <= 2.5) return 'ダイヤモンドダスト級';
-    if (t <= 4) return 'しばれの達人';
-    if (t <= 7) return '富良野の朝';
-    if (t <= 12) return 'まだ少し濡れてる';
+    if (t <= 1.5) return 'なまら速い';
+    if (t <= 3.5) return 'ダイヤモンドダスト級';
+    if (t <= 6) return 'しばれの達人';
+    if (t <= 10) return '富良野の朝';
+    if (t <= 16) return 'まだ少し濡れてる';
     return 'ぬるい朝';
   }
   /* 投稿文に付けるリンク。空ならこのページ自身のアドレスを使う。固定したいときは公開URLを入れる。 */
@@ -420,7 +474,7 @@ h1 {
   }
   function shareString() {
     var u = pageUrl();
-    return '凍結タオル選手権 富良野：' + time.toFixed(2) + '秒で凍結！(最高' + maxRps.toFixed(1) + '回転/秒) ランク「' + rankOf(time) + '」 #凍結タオル選手権 #富良野' + (u ? ' ' + u : '');
+    return '凍結タオル選手権 富良野「' + stage.name + '」：' + time.toFixed(2) + '秒で凍結！(最高' + maxRps.toFixed(1) + '回転/秒) ランク「' + rankOf(time) + '」 #凍結タオル選手権 #富良野' + (u ? ' ' + u : '');
   }
 
   function updateShareLinks() {
@@ -434,7 +488,7 @@ h1 {
   function finish() {
     finished = true; flash = 1; down = false; samples.length = 0;
     finishAt = performance.now();
-    isBest = (best === null || time < best);
+    isBest = (stage.id === 'normal') && (best === null || time < best);
     if (isBest) { best = time; try { localStorage.setItem('frozen-towel-best', String(best)); } catch (e) {} }
     var count = reduceMotion ? 20 : 90;
     for (var i = 0; i < count; i++) {
@@ -446,7 +500,8 @@ h1 {
 
   function showResult() {
     resultShown = true;
-    setText($('rankV'), rankOf(time));
+    setText($('rankV'), stage.name + ' ・ ' + rankOf(time));
+    setText($('rNote'), stage.id === 'normal' ? '' : (stage.kind === 'bonus' ? 'ボーナスステージの記録は、ベストに入りません' : 'ハンデステージの記録は、ベストに入りません'));
     setText($('rTime'), time.toFixed(2));
     setText($('rMax'), maxRps.toFixed(1) + ' 回/秒');
     setText($('rAvg'), (time > 0 ? revs / time : 0).toFixed(1) + ' 回/秒');
@@ -464,12 +519,14 @@ h1 {
     prog = 0; time = 0; revs = 0; maxRps = 0; curRps = 0;
     started = false; finished = false; resultShown = false; flash = 0; isBest = false;
     parts.length = 0;
+    applyStage(pickStage());
     $('result').hidden = true;
     var h = $('hint'); h.style.opacity = '1';
     setText(h, '画面をぐるぐるなぞって、濡れタオルを振り回そう');
   }
 
   $('resetBtn').addEventListener('click', reset);
+  $('stageSel').addEventListener('change', function () { stageMode = this.value; reset(); });
   $('againBtn').addEventListener('click', reset);
   $('copyBtn').addEventListener('click', function () {
     var txt = shareString(), btn = $('copyBtn');
@@ -506,8 +563,8 @@ h1 {
       if (started) {
         time += dt; revs += rps * dt;
         if (rps > maxRps) maxRps = rps;
-        if (rps < 0.45) prog -= 0.04 * dt;
-        else prog += 0.075 * Math.pow(rps, 1.35) * dt;
+        if (rps < 0.45) prog -= 0.04 * stage.melt * dt;
+        else prog += 0.0375 * stage.mult * Math.pow(rps, 1.35) * dt;
         prog = clamp(prog, 0, 1);
         if (prog >= 1) finish();
       }
@@ -523,8 +580,19 @@ h1 {
     }
     for (var j = 0; j < flakes.length; j++) {
       var f = flakes[j];
-      f.y += f.v * dt / H;
+      f.y += f.v * stage.flakeFall * dt / H;
+      f.x += stage.flakeDrift * dt;
       if (f.y > 1) { f.y = -0.02; }
+      if (f.x > 1) f.x -= 1;
+    }
+    if (stage.count) {
+      for (var wj = 0; wj < wx.length; wj++) {
+        var wp = wx[wj];
+        wp.y += stage.fall * wp.v * dt / H;
+        wp.x += stage.wind * wp.v * dt / W;
+        if (wp.y > 1) { wp.y -= 1.05; wp.x = Math.random(); }
+        if (wp.x > 1) wp.x -= 1;
+      }
     }
     flash *= Math.exp(-dt * 4);
 
@@ -536,7 +604,7 @@ h1 {
     setText($('pctV'), pct + '%');
     $('barFill').style.width = (prog * 100).toFixed(1) + '%';
     if ($('bar')._p !== pct) { $('bar').setAttribute('aria-valuenow', String(pct)); $('bar')._p = pct; }
-    var tt = Math.round(6 - 30 * prog);
+    var tt = Math.round(6 + (stage.air - 6) * prog);
     setText($('towelT'), (tt >= 0 ? '+' : '−') + Math.abs(tt) + '℃');
     if (started && !finished) {
       var h = $('hint');
@@ -705,16 +773,38 @@ h1 {
     ctx.restore();
   }
 
+  function drawWeather(ts) {
+    var i;
+    if (stage.id === 'fubuki') { ctx.fillStyle = 'rgba(232,243,255,0.2)'; ctx.fillRect(0, 0, W, H); }
+    else if (stage.id === 'ame') { ctx.fillStyle = 'rgba(38,52,74,0.42)'; ctx.fillRect(0, 0, W, H); }
+    if (stage.id !== 'ame') {
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      for (i = 0; i < flakes.length; i++) {
+        var f = flakes[i];
+        ctx.beginPath();
+        ctx.arc(f.x * W + Math.sin(ts * 0.6 + f.ph) * 10, f.y * H, f.r, 0, TAU); ctx.fill();
+      }
+    }
+    if (stage.count) {
+      var cnt = reduceMotion ? Math.floor(stage.count / 3) : stage.count;
+      var sx = stage.wind * stage.streak, sy = stage.fall * stage.streak;
+      ctx.strokeStyle = stage.id === 'ame' ? 'rgba(175,205,240,0.55)' : 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = stage.id === 'ame' ? 1 : 1.6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (i = 0; i < cnt; i++) {
+        var q = wx[i], x = q.x * W, y = q.y * H;
+        ctx.moveTo(x, y); ctx.lineTo(x - sx * q.v, y - sy * q.v);
+      }
+      ctx.stroke();
+    }
+  }
+
   function render(ts) {
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     drawSky(ts);
     if (bgc) ctx.drawImage(bgc, 0, 0, W, H);
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    for (var i = 0; i < flakes.length; i++) {
-      var f = flakes[i];
-      ctx.beginPath();
-      ctx.arc(f.x * W + Math.sin(ts * 0.6 + f.ph) * 10, f.y * H, f.r, 0, TAU); ctx.fill();
-    }
+    drawWeather(ts);
     drawPerson();
     drawTowel();
     drawParts(ts);
@@ -724,7 +814,7 @@ h1 {
 
   /* ---------- boot ---------- */
   layout();
-  if (window.ResizeObserver) { new ResizeObserver(layout).observe(stage); }
+  if (window.ResizeObserver) { new ResizeObserver(layout).observe(stageEl); }
   else { window.addEventListener('resize', layout); }
   var last = performance.now();
   function frame(now) {
